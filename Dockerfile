@@ -2,10 +2,10 @@ FROM golang:1.20-alpine AS builder
 
 WORKDIR /app
 
-# Copy go.mod first (assuming no go.sum since there are no external dependencies)
-COPY go.mod ./
+COPY go.mod go.sum ./
 
-# Copy the rest of the source code
+RUN go mod download
+
 COPY . .
 
 # Build the application
