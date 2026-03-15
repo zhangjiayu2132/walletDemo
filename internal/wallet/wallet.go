@@ -1,20 +1,22 @@
 package wallet
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
 )
 
-// ErrWalletNotFound is returned when a wallet is not found.
 var ErrWalletNotFound = errors.New("wallet not found")
 
-// ErrInsufficientFunds is returned when a wallet doesn't have enough balance for a transfer.
 var ErrInsufficientFunds = errors.New("insufficient funds")
 
-// ErrIdempotencyConflict is returned when a concurrent request with the same idempotency key is processing.
 var ErrIdempotencyConflict = errors.New("request is currently processing")
+
+var ErrIdempotencyMismatch = errors.New("idempotency key already used with different parameters")
 
 type TransferStatus string
 
@@ -23,33 +25,40 @@ const (
 	StatusSuccess    TransferStatus = "success"
 )
 
-// Wallet represents a digital wallet.
+type idempotencyRecord struct {
+	status  TransferStatus
+	reqHash string
+}
+
 type Wallet struct {
 	ID      string
 	Balance int64
 	mu      sync.Mutex
 }
 
-// Service defines the operations for the wallet service.
 type Service interface {
 	CreateWallet() (*Wallet, error)
 	GetWallet(id string) (*Wallet, error)
 	TransferFunds(sourceID, destID string, amount int64, idempotencyKey string) error
 }
 
-// inMemoryService implements the Service interface using a map and a RWMutex for thread safety.
 type inMemoryService struct {
 	mu                 sync.RWMutex
 	wallets            map[string]*Wallet
-	processedTransfers map[string]TransferStatus
+	processedTransfers map[string]*idempotencyRecord
 }
 
-// NewService creates a new instance of the wallet service.
 func NewService() Service {
 	return &inMemoryService{
 		wallets:            make(map[string]*Wallet),
-		processedTransfers: make(map[string]TransferStatus),
+		processedTransfers: make(map[string]*idempotencyRecord),
 	}
+}
+
+func computeRequestHash(sourceID, destID string, amount int64) string {
+	data := fmt.Sprintf("%s:%s:%d", sourceID, destID, amount)
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
 }
 
 // CreateWallet creates a new wallet with an initial balance of 0.
@@ -95,16 +104,24 @@ func (s *inMemoryService) TransferFunds(sourceID, destID string, amount int64, i
 		return errors.New("transfer amount must be positive")
 	}
 
+	reqHash := computeRequestHash(sourceID, destID, amount)
+
 	s.mu.Lock()
 	if idempotencyKey != "" {
-		if status, exists := s.processedTransfers[idempotencyKey]; exists {
+		if record, exists := s.processedTransfers[idempotencyKey]; exists {
 			s.mu.Unlock()
-			if status == StatusProcessing {
+			if record.status == StatusProcessing {
 				return ErrIdempotencyConflict
 			}
-			return nil // Idempotency check: already processed successfully
+			if record.reqHash != reqHash {
+				return ErrIdempotencyMismatch
+			}
+			return nil
 		}
-		s.processedTransfers[idempotencyKey] = StatusProcessing
+		s.processedTransfers[idempotencyKey] = &idempotencyRecord{
+			status:  StatusProcessing,
+			reqHash: reqHash,
+		}
 	}
 
 	defer func() {
@@ -113,7 +130,7 @@ func (s *inMemoryService) TransferFunds(sourceID, destID string, amount int64, i
 			if err != nil {
 				delete(s.processedTransfers, idempotencyKey)
 			} else {
-				s.processedTransfers[idempotencyKey] = StatusSuccess
+				s.processedTransfers[idempotencyKey].status = StatusSuccess
 			}
 			s.mu.Unlock()
 		}
@@ -132,7 +149,6 @@ func (s *inMemoryService) TransferFunds(sourceID, destID string, amount int64, i
 	}
 	s.mu.Unlock()
 
-	// Ordered locking to prevent deadlocks
 	if sourceID < destID {
 		source.mu.Lock()
 		dest.mu.Lock()
@@ -149,7 +165,6 @@ func (s *inMemoryService) TransferFunds(sourceID, destID string, amount int64, i
 		return ErrInsufficientFunds
 	}
 
-	// Perform the transfer
 	source.Balance -= amount
 	dest.Balance += amount
 

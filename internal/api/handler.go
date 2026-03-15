@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"math"
 	"net/http"
 	"wallet/internal/wallet"
 )
@@ -35,8 +34,8 @@ func (h *Handler) handleWallets(w http.ResponseWriter, r *http.Request) {
 
 // WalletResponse represents the API response for a wallet.
 type WalletResponse struct {
-	ID      string  `json:"id"`
-	Balance float64 `json:"balance"` // output in Yuan
+	ID      string `json:"id"`
+	Balance int64  `json:"balance"`
 }
 
 // handleWalletByID handles GET /wallets/{id}
@@ -73,7 +72,7 @@ func (h *Handler) handleWalletByID(w http.ResponseWriter, r *http.Request) {
 
 	resp := WalletResponse{
 		ID:      wlt.ID,
-		Balance: float64(wlt.Balance) / 100.0,
+		Balance: wlt.Balance,
 	}
 	respondWithJSON(w, http.StatusOK, resp)
 }
@@ -88,16 +87,15 @@ func (h *Handler) createWallet(w http.ResponseWriter, r *http.Request) {
 
 	resp := WalletResponse{
 		ID:      wlt.ID,
-		Balance: float64(wlt.Balance) / 100.0,
+		Balance: wlt.Balance,
 	}
 	respondWithJSON(w, http.StatusCreated, resp)
 }
 
-// TransferRequest represents the payload for transferring funds.
 type TransferRequest struct {
-	SourceWalletID      string  `json:"source_wallet"`
-	DestinationWalletID string  `json:"destination_wallet"`
-	Amount              float64 `json:"amount"` // input in Yuan
+	SourceWalletID      string `json:"source_wallet"`
+	DestinationWalletID string `json:"destination_wallet"`
+	Amount              int64  `json:"amount"`
 }
 
 // handleTransfer handles POST /wallets/transfer
@@ -123,16 +121,8 @@ func (h *Handler) handleTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Safely convert floating point Yuan to integer representation in Cents
-	amountCents := int64(math.Round(req.Amount * 100))
-
-	if amountCents <= 0 {
-		respondWithError(w, http.StatusBadRequest, "transfer amount must be at least 0.01")
-		return
-	}
-
 	idempotencyKey := r.Header.Get("Idempotency-Key")
-	err := h.service.TransferFunds(req.SourceWalletID, req.DestinationWalletID, amountCents, idempotencyKey)
+	err := h.service.TransferFunds(req.SourceWalletID, req.DestinationWalletID, req.Amount, idempotencyKey)
 	if err != nil {
 		switch err {
 		case wallet.ErrWalletNotFound:
@@ -141,6 +131,8 @@ func (h *Handler) handleTransfer(w http.ResponseWriter, r *http.Request) {
 			respondWithError(w, http.StatusBadRequest, "insufficient funds")
 		case wallet.ErrIdempotencyConflict:
 			respondWithError(w, http.StatusConflict, "request is already processing")
+		case wallet.ErrIdempotencyMismatch:
+			respondWithError(w, http.StatusBadRequest, "idempotency key already used with different parameters")
 		default:
 			if err.Error() == "cannot transfer to the same wallet" {
 				respondWithError(w, http.StatusBadRequest, err.Error())

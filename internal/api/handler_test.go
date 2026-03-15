@@ -90,7 +90,7 @@ func TestTransferFunds(t *testing.T) {
 	transferReq := TransferRequest{
 		SourceWalletID:      w1.ID,
 		DestinationWalletID: w2.ID,
-		Amount:              0.50, // Test with Yuan amount (50 cents)
+		Amount:              50,
 	}
 	body, _ := json.Marshal(transferReq)
 

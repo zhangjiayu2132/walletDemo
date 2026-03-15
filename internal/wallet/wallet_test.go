@@ -114,10 +114,9 @@ func TestIdempotency(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err1)
 	}
 
-	// Second transfer with same idempotency key should succeed without changing balance
-	err2 := s.TransferFunds(w1.ID, w2.ID, 20, idemKey)
+	err2 := s.TransferFunds(w1.ID, w2.ID, 50, idemKey)
 	if err2 != nil {
-		t.Fatalf("expected idempotency nil error, got %v", err2)
+		t.Fatalf("expected nil error for same request, got %v", err2)
 	}
 
 	getW1, _ := s.GetWallet(w1.ID)
@@ -128,6 +127,36 @@ func TestIdempotency(t *testing.T) {
 	}
 	if getW2.Balance != 50 {
 		t.Errorf("expected w2 balance 50, got %d", getW2.Balance)
+	}
+}
+
+func TestIdempotencyMismatch(t *testing.T) {
+	s := NewService()
+	w1, _ := s.CreateWallet()
+	w2, _ := s.CreateWallet()
+
+	svc := s.(*inMemoryService)
+	svc.wallets[w1.ID].Balance = 100
+
+	idemKey := "tx-mismatch"
+	err1 := s.TransferFunds(w1.ID, w2.ID, 50, idemKey)
+	if err1 != nil {
+		t.Fatalf("expected no error, got %v", err1)
+	}
+
+	err2 := s.TransferFunds(w1.ID, w2.ID, 20, idemKey)
+	if err2 != ErrIdempotencyMismatch {
+		t.Errorf("expected ErrIdempotencyMismatch, got %v", err2)
+	}
+
+	err3 := s.TransferFunds(w1.ID, w2.ID, 50, idemKey)
+	if err3 != nil {
+		t.Fatalf("expected nil error for same request, got %v", err3)
+	}
+
+	getW1, _ := s.GetWallet(w1.ID)
+	if getW1.Balance != 50 {
+		t.Errorf("expected w1 balance 50, got %d", getW1.Balance)
 	}
 }
 
