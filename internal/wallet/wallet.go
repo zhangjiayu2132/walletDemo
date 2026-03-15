@@ -68,17 +68,20 @@ func (s *inMemoryService) CreateWallet() (*Wallet, error) {
 // GetWallet retrieves a wallet by its ID.
 func (s *inMemoryService) GetWallet(id string) (*Wallet, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	wallet, exists := s.wallets[id]
+	s.mu.RUnlock()
+
 	if !exists {
 		return nil, ErrWalletNotFound
 	}
 
-	// Return a copy to prevent external mutation
+	wallet.mu.Lock()
+	balance := wallet.Balance
+	wallet.mu.Unlock()
+
 	return &Wallet{
 		ID:      wallet.ID,
-		Balance: wallet.Balance,
+		Balance: balance,
 	}, nil
 }
 

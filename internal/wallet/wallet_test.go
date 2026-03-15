@@ -3,6 +3,7 @@ package wallet
 import (
 	"sync"
 	"testing"
+
 	"github.com/google/uuid"
 )
 
@@ -128,6 +129,35 @@ func TestIdempotency(t *testing.T) {
 	if getW2.Balance != 50 {
 		t.Errorf("expected w2 balance 50, got %d", getW2.Balance)
 	}
+}
+
+func TestConcurrentGetAndTransfer(t *testing.T) {
+	s := NewService()
+
+	w1, _ := s.CreateWallet()
+	w2, _ := s.CreateWallet()
+
+	svc := s.(*inMemoryService)
+	svc.wallets[w1.ID].Balance = 10000
+
+	var wg sync.WaitGroup
+	numOps := 1000
+
+	for i := 0; i < numOps; i++ {
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			_, _ = s.GetWallet(w1.ID)
+		}()
+
+		go func() {
+			defer wg.Done()
+			_ = s.TransferFunds(w1.ID, w2.ID, 1, "")
+		}()
+	}
+
+	wg.Wait()
 }
 
 func TestConcurrentTransfers(t *testing.T) {
