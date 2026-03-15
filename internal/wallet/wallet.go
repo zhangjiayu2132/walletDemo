@@ -3,6 +3,7 @@ package wallet
 import (
 	"errors"
 	"sync"
+
 	"github.com/google/uuid"
 )
 
@@ -24,9 +25,9 @@ const (
 
 // Wallet represents a digital wallet.
 type Wallet struct {
-	ID      string 
-	Balance int64  
-	mu      sync.Mutex 
+	ID      string
+	Balance int64
+	mu      sync.Mutex
 }
 
 // Service defines the operations for the wallet service.
@@ -68,9 +69,9 @@ func (s *inMemoryService) CreateWallet() (*Wallet, error) {
 // GetWallet retrieves a wallet by its ID.
 func (s *inMemoryService) GetWallet(id string) (*Wallet, error) {
 	s.mu.RLock()
-	wallet, exists := s.wallets[id]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 
+	wallet, exists := s.wallets[id]
 	if !exists {
 		return nil, ErrWalletNotFound
 	}
